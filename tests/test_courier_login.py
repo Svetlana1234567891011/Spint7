@@ -1,24 +1,25 @@
 import pytest
-from conftest import register_new_courier_and_return_login_password, random_string
-from utils.special_request import CourierRequests
+from conftest import create_payload
+from utils.special_request import CourierRequests, generate_random_string
 import allure
+
+randoms_string = generate_random_string(10)
 
 
 @allure.feature('Проверка авторизации курьера, успешный запрос возвращает id')
 class TestLogin:
     @allure.title('Курьер может авторизоваться с существующей учетной записью')
-    def test_courier_can_login(self, create_courier_and_login):
-        payload = register_new_courier_and_return_login_password()
-        user = create_courier_and_login(data=payload)
-        assert user['login_courier']['id']
+    def test_courier_can_login(self, courier_with_payload):
+        response = courier_with_payload.post_login_courier(data=courier_with_payload.payload)
+        assert response['id']
 
-    @pytest.mark.parametrize("remove_login", ["login"])
-    @allure.title('Курьер с отсутствующим логином а не может залогиниться')
-    def test_courier_cannot_login(self, remove_login, create_courier_and_login):
-        payload = register_new_courier_and_return_login_password()
-        user = create_courier_and_login(data=payload)
-        payload.pop(remove_login)
-        response = CourierRequests().post_login_courier(data=payload, status=400)
+    @pytest.mark.parametrize("change_value",
+                             ["login"]
+                             )
+    @allure.title('Курьер с отсутствующим логином не может залогиниться')
+    def test_courier_cannot_login(self, courier_with_payload, change_value):
+        courier_with_payload.payload[change_value] = None  # Удаляем логин
+        response = courier_with_payload.post_login_courier(data=courier_with_payload.payload)
         assert response['message'] == 'Недостаточно данных для входа'
 
     @pytest.mark.parametrize("change_value",
@@ -26,21 +27,27 @@ class TestLogin:
                               "password"]
                              )
     @allure.title('Система вернёт ошибку, если неправильно указать логин или пароль')
-    def test_courier_cannot_login_due_wrong_input(self, change_value):
-        payload = register_new_courier_and_return_login_password()  # create_user_payload(login='rand', password='rand', firstname='first_name')
-        CourierRequests().post_create_courier(data=payload)
-        payload[change_value] = random_string
-        response = CourierRequests().post_login_courier(data=payload, status=404)
+    def test_courier_cannot_login_due_wrong_input(self, change_value, create_payload):
+        CourierRequests().post_create_courier(data=create_payload)
+        create_payload[change_value] = randoms_string
+        response = CourierRequests().post_login_courier(data=create_payload)
         assert response['message'] == 'Учетная запись не найдена'
 
+    @pytest.mark.parametrize("change_value",
+                             ["login",
+                              "password"]
+                             )
     @allure.title('Если авторизоваться под несуществующим пользователем, запрос возвращает ошибку')
-    def test_courier_cant_login_for_deleted_account(self):
-        payload = register_new_courier_and_return_login_password()
-        CourierRequests().post_create_courier(data=payload)
-        response = CourierRequests().post_login_courier(data=payload)
-        courier_id = response["id"]
+    def test_courier_cant_login_for_deleted_account(self, change_value, courier_with_payload):
+        courier_with_payload.payload[change_value] = randoms_string
+        response = CourierRequests().post_login_courier(data=courier_with_payload.payload)
+        assert response.get('message') == 'Учетная запись не найдена'
 
-        response_delete = CourierRequests().delete_courier(courier_id=courier_id)
-        assert response_delete['ok']
-        response = CourierRequests().post_login_courier(data=payload, status=404)
-        assert response["message"] == "Учетная запись не найдена"
+    @allure.title('Если авторизоваться под несуществующим пользователем, запрос возвращает ошибку')
+    def test_courier_cant_login_for_deleted_account(self, courier_with_payload):
+        response = courier_with_payload.post_login_courier(data=courier_with_payload.payload)
+        courier_id = response["id"]
+        courier_with_payload.delete_courier(courier_id=courier_id)
+        response = courier_with_payload.post_login_courier(data=courier_with_payload.payload)
+
+        assert response.get('message') == 'Учетная запись не найдена'
